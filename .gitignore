@@ -1,0 +1,6 @@
+__pycache__/
+*.pyc
+.pytest_cache/
+dual-speed.config.json
+*.part
+*.tmp

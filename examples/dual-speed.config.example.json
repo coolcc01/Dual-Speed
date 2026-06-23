@@ -1,0 +1,21 @@
+{
+  "logical_root": "/your-public-nas-mount-here",
+  "mount_root": "/mnt/.dual-speed",
+  "export_path": "/your-nas-export-here",
+  "nfs_version": "3",
+  "paths": [
+    {
+      "name": "a",
+      "nas_ip": "your-nas-ip-a",
+      "iface": "your-client-nic-a",
+      "src_ip": "your-client-ip-a"
+    },
+    {
+      "name": "b",
+      "nas_ip": "your-nas-ip-b",
+      "iface": "your-client-nic-b",
+      "src_ip": "your-client-ip-b"
+    }
+    
+  ]
+}

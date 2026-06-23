@@ -1,0 +1,273 @@
+#!/usr/bin/env python3
+"""
+Generate and run dual-speed transfer test cases.
+"""
+
+from __future__ import annotations
+
+import argparse
+import hashlib
+import os
+import shlex
+import shutil
+import shutil as shutil_module
+import subprocess
+import sys
+import tarfile
+import time
+from pathlib import Path
+
+
+DUAL_SPEED = Path(os.environ.get("DUAL_SPEED_BIN") or shutil_module.which("dual-speed") or "./bin/dual-speed")
+
+
+CASE_SPECS = [
+    ("empty/zero.txt", 0, "text"),
+    ("tiny/readme.txt", 256, "text"),
+    ("tiny/config.json", 1024, "json"),
+    ("tiny/script.py", 2048, "text"),
+    ("odd/file01.log", 17 * 1024, "text"),
+    ("odd/file02.csv", 33 * 1024, "csv"),
+    ("odd/file03.md", 65 * 1024, "text"),
+    ("media/image_like.png", 384 * 1024, "random"),
+    ("media/audio_like.flac", 768 * 1024, "random"),
+    ("archives/archive_like.zip", 1536 * 1024, "random"),
+    ("models/tensor_a.safetensors", 8 * 1024 * 1024, "random"),
+    ("models/tensor_b.gguf", 13 * 1024 * 1024, "random"),
+    ("compressible/repeated_text.txt", 8 * 1024 * 1024, "text"),
+    ("compressible/zeros.bin", 16 * 1024 * 1024, "zero"),
+    ("nested/a/b/c/deep_file.parquet", 3 * 1024 * 1024, "random"),
+]
+
+
+FULL_EXTRA = [
+    ("large/large_random_64m.bin", 64 * 1024 * 1024, "random"),
+    ("large/large_zero_128m.bin", 128 * 1024 * 1024, "zero"),
+    ("large/large_text_64m.txt", 64 * 1024 * 1024, "text"),
+]
+
+
+def run(cmd: list[str], *, check: bool = True) -> subprocess.CompletedProcess:
+    print("+ " + " ".join(cmd), flush=True)
+    return subprocess.run(cmd, text=True, check=check)
+
+
+def write_pattern(path: Path, size: int, kind: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if size == 0:
+        path.write_bytes(b"")
+        return
+    chunk_size = 1024 * 1024
+    remaining = size
+    with path.open("wb") as f:
+        if kind == "random":
+            while remaining > 0:
+                data = os.urandom(min(chunk_size, remaining))
+                f.write(data)
+                remaining -= len(data)
+        elif kind == "zero":
+            block = b"\0" * chunk_size
+            while remaining > 0:
+                data = block[: min(chunk_size, remaining)]
+                f.write(data)
+                remaining -= len(data)
+        elif kind == "json":
+            line = b'{"symbol":"BTCUSDT","price":123456.78,"side":"long","note":"dual-speed testcase"}\n'
+            while remaining > 0:
+                data = line[: min(len(line), remaining)]
+                f.write(data)
+                remaining -= len(data)
+        elif kind == "csv":
+            line = b"ts,symbol,price,volume\n2026-06-23T00:00:00Z,BTCUSDT,123456.78,42.0\n"
+            while remaining > 0:
+                data = line[: min(len(line), remaining)]
+                f.write(data)
+                remaining -= len(data)
+        else:
+            line = b"dual-speed testcase repeated text, agent friendly transfer validation.\n"
+            while remaining > 0:
+                data = line[: min(len(line), remaining)]
+                f.write(data)
+                remaining -= len(data)
+
+
+def sha256_tree(root: Path) -> dict[str, str]:
+    out = {}
+    for p in sorted(root.rglob("*")):
+        if not p.is_file():
+            continue
+        h = hashlib.sha256()
+        with p.open("rb") as f:
+            for chunk in iter(lambda: f.read(1024 * 1024), b""):
+                h.update(chunk)
+        out[str(p.relative_to(root))] = h.hexdigest()
+    return out
+
+
+def total_size(root: Path) -> int:
+    return sum(p.stat().st_size for p in root.rglob("*") if p.is_file())
+
+
+def create_dataset(root: Path, scale: str) -> None:
+    if root.exists():
+        shutil.rmtree(root)
+    specs = list(CASE_SPECS)
+    if scale == "full":
+        specs += FULL_EXTRA
+    for rel, size, kind in specs:
+        write_pattern(root / rel, size, kind)
+
+
+def compression_probe(src: Path, work: Path) -> None:
+    tar_path = work / "dataset.tar"
+    gz_path = work / "dataset.tar.gz"
+    for p in (tar_path, gz_path):
+        if p.exists():
+            p.unlink()
+
+    t0 = time.monotonic()
+    with tarfile.open(tar_path, "w") as tf:
+        tf.add(src, arcname=src.name)
+    tar_elapsed = time.monotonic() - t0
+
+    t1 = time.monotonic()
+    with tarfile.open(gz_path, "w:gz") as tf:
+        tf.add(src, arcname=src.name)
+    gz_elapsed = time.monotonic() - t1
+
+    raw = total_size(src)
+    tar_size = tar_path.stat().st_size
+    gz_size = gz_path.stat().st_size
+    print()
+    print("compression probe:")
+    print(f"  raw:    {raw / 1_000_000:.1f} MB")
+    print(f"  tar:    {tar_size / 1_000_000:.1f} MB, create {tar_elapsed:.2f}s")
+    print(f"  tar.gz: {gz_size / 1_000_000:.1f} MB, create {gz_elapsed:.2f}s")
+    if gz_size < raw * 0.75:
+        print("  recommendation: compression may help for similar highly compressible data.")
+    else:
+        print("  recommendation: compression is not useful for already-compressed/random/model-like data.")
+
+
+def benchmark_auto_thresholds(args: argparse.Namespace) -> None:
+    if os.geteuid() != 0:
+        cmd = ["sudo", str(Path(__file__).resolve()), "benchmark"] + sys.argv[2:]
+        print("Benchmark needs sudo for dual-path mount setup.")
+        print("Run:")
+        print("  " + " ".join(shlex.quote(x) for x in cmd))
+        raise SystemExit(2)
+
+    root = Path(args.work_dir)
+    if root.exists():
+        shutil.rmtree(root)
+    root.mkdir(parents=True, exist_ok=True)
+    cases = [
+        ("one_8m", 1, 8 * 1024 * 1024),
+        ("one_128m", 1, 128 * 1024 * 1024),
+        ("one_512m", 1, 512 * 1024 * 1024),
+        ("three_64m", 3, 64 * 1024 * 1024),
+        ("four_64m", 4, 64 * 1024 * 1024),
+        ("eight_16m", 8, 16 * 1024 * 1024),
+        ("sixteen_4m", 16, 4 * 1024 * 1024),
+    ]
+
+    print("case,files,total_mb,strategy,elapsed_s,mbps")
+    for case_name, count, each_size in cases:
+        src = root / case_name / "src"
+        dst_base = args.nas_dir.rstrip("/") + "/" + case_name
+        src.mkdir(parents=True, exist_ok=True)
+        for i in range(count):
+            write_pattern(src / f"file_{i:03d}.bin", each_size, "random")
+        total_mb = total_size(src) / 1_000_000
+        for strategy in ("single", "dual", "auto"):
+            dst = dst_base + "_" + strategy
+            t0 = time.monotonic()
+            cmd = [str(DUAL_SPEED), "upload", str(src), dst, "--verify", "size", "--strategy", strategy]
+            if strategy == "dual":
+                cmd.append("--remount")
+            elif strategy == "single":
+                cmd.append("--no-prepare")
+            run(cmd)
+            elapsed = max(time.monotonic() - t0, 0.000001)
+            print(f"{case_name},{count},{total_mb:.1f},{strategy},{elapsed:.2f},{total_mb / elapsed:.1f}")
+            run(["rm", "-rf", dst])
+    if not args.keep:
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description="Run dual-speed transfer test cases")
+    sub = parser.add_subparsers(dest="cmd")
+
+    validate = sub.add_parser("validate")
+    validate.add_argument("--work-dir", default="/tmp/dual_speed_cases")
+    validate.add_argument("--nas-dir", default="/your-public-nas-mount-here/.dual_speed_testcases")
+    validate.add_argument("--scale", choices=("quick", "full"), default="quick")
+    validate.add_argument("--skip-transfer", action="store_true")
+    validate.add_argument("--keep", action="store_true")
+    validate.add_argument("--verify", choices=("size", "sha256"), default="sha256")
+
+    bench = sub.add_parser("benchmark")
+    bench.add_argument("--work-dir", default="/tmp/dual_speed_benchmark")
+    bench.add_argument("--nas-dir", default="/your-public-nas-mount-here/.dual_speed_benchmark")
+    bench.add_argument("--keep", action="store_true")
+
+    argv = sys.argv[1:]
+    if not argv or argv[0].startswith("-"):
+        argv = ["validate"] + argv
+    args = parser.parse_args(argv)
+
+    if args.cmd == "benchmark":
+        benchmark_auto_thresholds(args)
+        return
+
+    if not args.skip_transfer and os.geteuid() != 0:
+        cmd = ["sudo", str(Path(__file__).resolve())] + argv
+        print("Transfer test cases need sudo for route and hidden NFS mount setup.")
+        print("Run:")
+        print("  " + " ".join(shlex.quote(x) for x in cmd))
+        raise SystemExit(2)
+
+    work = Path(args.work_dir)
+    src = work / "src"
+    down = work / "download"
+    create_dataset(src, args.scale)
+    if down.exists():
+        shutil.rmtree(down)
+    down.mkdir(parents=True, exist_ok=True)
+
+    print(f"created dataset: {src}")
+    print(f"files: {sum(1 for p in src.rglob('*') if p.is_file())}")
+    print(f"size: {total_size(src) / 1_000_000:.1f} MB")
+    compression_probe(src, work)
+
+    if args.skip_transfer:
+        print("skip-transfer requested")
+        return
+
+    run([str(DUAL_SPEED), "upload", str(src), args.nas_dir, "--verify", args.verify, "--remount"])
+    run([str(DUAL_SPEED), "download", args.nas_dir, str(down), "--verify", args.verify])
+
+    src_hash = sha256_tree(src)
+    down_hash = sha256_tree(down)
+    if src_hash != down_hash:
+        missing = sorted(set(src_hash) ^ set(down_hash))
+        changed = sorted(k for k in set(src_hash) & set(down_hash) if src_hash[k] != down_hash[k])
+        raise SystemExit(f"download verification failed: missing_or_extra={missing[:10]} changed={changed[:10]}")
+    print("roundtrip sha256 tree ok")
+
+    print("testing resume path")
+    run([str(DUAL_SPEED), "upload", str(src), args.nas_dir, "--verify", "size"])
+
+    if not args.keep:
+        run(["rm", "-rf", str(down)])
+        run(["rm", "-rf", args.nas_dir])
+        shutil.rmtree(work, ignore_errors=True)
+        print("cleanup done")
+    else:
+        print(f"kept work dir: {work}")
+        print(f"kept NAS dir: {args.nas_dir}")
+
+
+if __name__ == "__main__":
+    main()
