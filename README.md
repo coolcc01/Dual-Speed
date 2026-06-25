@@ -1,10 +1,6 @@
 # Dual-Speed
 
-`dual-speed` is a multi-path NAS transfer tool that starts with the common dual-NIC case. It is especially useful for workstation and server motherboards with dual onboard NICs, dual 1GbE or 2.5GbE ports, add-in NICs, or any setup where a client can reach a NAS through two or more separate IP paths.
-
-Instead of fighting with LACP, bonding, MPTCP, SMB multichannel, or switch-side link aggregation, `dual-speed` takes the simple route: split suitable file workloads at the application layer and send each group through a different mounted NAS path. For many real NAS copy jobs, this achieves the practical throughput gain people want from link aggregation without requiring complex network configuration.
-
-The tool keeps one public NAS path for users, while internally splitting large multi-file upload and download workloads across two hidden NFSv3 mounts. This avoids confusing users with multiple mount points while still using both network links when it helps.
+**Copy large NAS folders faster by using multiple network ports, without LACP or bonding.**
 
 ## Common Use Case
 
