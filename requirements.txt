@@ -1,0 +1,2 @@
+# No third-party Python packages are required.
+# Dual-Speed currently uses only the Python standard library.

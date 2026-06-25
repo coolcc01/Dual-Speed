@@ -75,6 +75,24 @@ You can force a mode with `--strategy single` or `--strategy dual`.
 
 ## Setup
 
+Requirements:
+
+- Linux client with Python 3.10 or newer
+- NFS client tools, usually provided by `nfs-common` or `nfs-utils`
+- `iproute2` tools for route setup
+- sudo access for route and mount preparation
+
+Optional Python virtual environment:
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install --upgrade pip
+python -m pip install -r requirements.txt
+```
+
+The project currently uses only the Python standard library, so `requirements.txt` is intentionally minimal.
+
 Copy the example config:
 
 ```bash
