@@ -1,6 +1,6 @@
 # Dual-Speed
 
-**Copy large NAS folders faster by using multiple network ports, without LACP or bonding.**
+**More network lanes. More NAS speed.**
 
 ## Common Use Case
 
