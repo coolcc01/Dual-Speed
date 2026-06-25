@@ -139,17 +139,60 @@ Download:
 sudo dual-speed --config dual-speed.config.json download /your-public-nas-mount-here/source /local/target --verify size
 ```
 
+Dry run without changing files:
+
+```bash
+dual-speed --config dual-speed.config.json upload /local/source /your-public-nas-mount-here/target --dry-run --no-prepare
+```
+
+Speed test:
+
+```bash
+sudo dual-speed --config dual-speed.config.json speedtest --size-mb 1024
+```
+
 Benchmark:
 
 ```bash
 sudo DUAL_SPEED_BIN=./bin/dual-speed ./bin/dual-speed-testcases benchmark --nas-dir /your-public-nas-mount-here/.dual_speed_benchmark
 ```
 
+Validation test cases:
+
+```bash
+dual-speed-testcases --scale quick
+```
+
+## Operating Guidelines
+
+Use `dual-speed` for large NAS transfers, especially model folders, datasets, backups, media folders, or other large multi-file jobs. For tiny one-off files, ordinary `cp` or `rsync` is usually simpler and faster.
+
+Keep public paths pointed at the normal NAS mount, such as `/your-public-nas-mount-here`. Hidden internal mount paths are implementation details and should not be used directly in day-to-day transfer commands.
+
+`upload` and `download` default to `--strategy auto`:
+
+- one file uses single-path copy
+- multi-file transfers use dual path at 256 MB or more
+- 16 files or more use dual path
+- smaller transfers use single-path copy to avoid overhead
+
+Use `--strategy dual` to force both links for benchmarks or known-large jobs. Use `--strategy single` for tiny or latency-sensitive transfers.
+
+Prefer `--verify size` for normal large transfers. Use `--verify sha256` when integrity matters more than speed. Resume is enabled by default and skips existing same-size destination files.
+
+After important transfers, record the total size, elapsed time, combined MB/s, verification mode, and whether both configured NICs showed traffic. If traffic only appears on one NIC, fall back to ordinary NAS transfer and check routing, mounts, and NFS version before relying on acceleration.
+
+## Small Files And Compression
+
+Many tiny files are often limited by metadata operations rather than bandwidth. Packing can help only when extraction runs on the NAS host itself through SSH or an API. Packing and then extracting through NFS from the client usually wastes network I/O because the archive is read back and the extracted files are written over the network again.
+
+Compression is workload-dependent. Do not compress model files, archives, images, audio, video, or random-like data by default. Consider compression for large text, CSV, JSON, logs, or zero-heavy data only when a probe shows enough size reduction to offset compression time.
+
 ## Notes
 
 NFSv3 is used because NFSv4 clients can merge multiple NAS IPs into a single session, defeating dual-path routing in some setups.
 
-Packing many tiny files can help only if extraction runs on the NAS itself through SSH or an API. Packing and then extracting through NFS from the client usually wastes network I/O.
+Commands that modify routes or mounts normally require sudo.
 
 ## License
 

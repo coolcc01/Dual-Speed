@@ -84,7 +84,7 @@ def write_pattern(path: Path, size: int, kind: str) -> None:
                 f.write(data)
                 remaining -= len(data)
         else:
-            line = b"dual-speed testcase repeated text, agent friendly transfer validation.\n"
+            line = b"dual-speed testcase repeated text, portable transfer validation.\n"
             while remaining > 0:
                 data = line[: min(len(line), remaining)]
                 f.write(data)

@@ -96,13 +96,13 @@ Dry run:
 dual-speed --config dual-speed.config.json download /your-public-nas-mount-here/path/to/source /local/dest --dry-run --no-prepare
 ```
 
-## Agent Rules
+## Operating Guidelines
 
 Use this tool for large NAS transfers, especially model folders, datasets, many files, or large multi-file jobs.
 
 Do not use it for tiny one-off files. Plain `cp` is fine for small files.
 
-When a command may need sudo, tell the user the exact command to run if password entry is required.
+Commands that modify routes or mounts normally require sudo.
 
 After a transfer, report:
 
